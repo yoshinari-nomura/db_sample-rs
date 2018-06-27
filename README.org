@@ -1,0 +1,34 @@
+* Rust
+   + emacs
+    + racer
+    + rust-mode
+    + flycheck-rust
+    + company-racer
+  [[https://qiita.com/AoiMoe/items/a532bb0e554c8060103c][cargoのソースを読んでみよう - 第0回 : Rust環境の構築]]
+  rustfmt は標準で (rustup updarte) 入るので入れなくてもいいみたい
+* ドキュメント
+  + [[https://doc.rust-lang.org/std/index.html][std - Rust]]
+* 標準入力から行を読みこむには?
+  [[https://stackoverflow.com/questions/30186037/how-can-i-read-a-single-line-from-stdin][rust - How can I read a single line from stdin? - Stack Overflow]]
+
+* Emacs 環境
+  + Racer ::  https://github.com/racer-rust/emacs-racer
+    + 入力補完
+    + 定義にジャンプ
+    + ライブラリのドキュメント表示
+
+* COMMENT
+
+    loop {
+        match file.read_line(&mut line) {
+            Ok(n) => {
+                println!("read size: {}", n);
+            }
+            Err(e) => {
+                eprintln!("{}", e);
+            }
+        }
+        println!("line: '{}'", &line);
+        parse_line(&line);
+        line.clear();
+    }
