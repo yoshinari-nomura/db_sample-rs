@@ -1,70 +1,82 @@
 extern crate db_sample;
 use db_sample::*;
-
-use std::io::{self, BufRead};
-
-// | コマンド | 意味                            | 備考                       |
-// |----------+---------------------------------+----------------------------|
-// | %Q       | 終了(Quit)                      |                            |
-// | %C       | 登録件数などの表示(Check)       |                            |
-// | %P n     | 先頭からn件表示 (Print)         | n=0: 全件, n<0: 後ろ -n 件 |
-// | %R file  | fileから読み込み(Read)          |                            |
-// | %W file  | fileへ書き出し(Write)           |                            |
-// | %F word  | wordを検索(Find)                | 結果を%Pと同じ形式で表示   |
-// | %S n     | データをn番目の項目で整列(Sort) | 表示はしない               |
+use std::io::{self, BufRead, BufReader};
+use std::fs;
 
 fn main() {
     let file = io::stdin();
     let mut profile_data_store = ProfileDB::new();
 
-    for line in file.lock().lines() {
-        match parse_line(&line.unwrap()) {
-            Action::Append(profile) => profile_data_store.push(profile),
-            Action::Quit => std::process::exit(0),
-            Action::Count => println!("Command: Count"),
-            Action::Print(start) => println!("Command: Print {}", start),
-            Action::Read(file) => println!("Command: Read {}", file),
-            Action::Write(file) => println!("Command: Write {}", file),
-            Action::Find(word) => println!("Command: Find {}", word),
-            Action::Sort(key) => println!("Command: Sort {}", key),
-            Action::Unknown(error) => println!("Error: {}", error),
-            // profile_data_store.exec(command),
-        }
+    parse_lines(Box::new(file), &mut profile_data_store);
+}
+
+/// Parse lines from `file` and act on `profile_db`.
+///
+/// FILE would be Stdin or File.
+///
+/// # Exaample
+/// ```
+/// file = Box::new(fs::File::open("filename.csv").unwrap());
+/// file = Box::new(io::stdin());
+/// ```
+fn parse_lines(file: Box<io::Read>, profile_db: &mut ProfileDB) {
+    let buf = BufReader::new(file);
+
+    for line in buf.lines() {
+        do_action(parse_line(&line.unwrap()), profile_db);
+    }
+}
+
+fn do_action(action: Action, profile_db: &mut ProfileDB) {
+    match action {
+        Action::Append(profile) => Action::append(profile_db, profile),
+        Action::Quit => Action::quit(),
+        Action::Count => Action::count(profile_db),
+        Action::Print(start) => Action::print(profile_db, start),
+        Action::Read(file) => parse_lines(Box::new(fs::File::open(file).unwrap()), profile_db),
+        Action::Write(file) => Action::write(profile_db, file).unwrap(),
+        Action::Find(word) => Action::find(profile_db, word),
+        Action::Sort(key) => Action::sort(profile_db, key),
+        Action::Error(message) => println!("Error: {}", message),
     }
 }
 
 fn parse_line(line: &str) -> Action {
     if line.starts_with("%") {
-        parse_cmd(&line[1..])
+        if let Ok(cmd) = parse_cmd(&line[1..]) {
+            cmd
+        } else {
+            Action::Error("illegal command format")
+        }
+
     } else {
         if let Ok(profile) = parse_csv(line) {
             Action::Append(profile)
         } else {
-            Action::Unknown("CSV parse error")
+            Action::Error("illegal CSV format")
         }
     }
 }
 
-fn parse_cmd(line: &str) -> Action {
-    let error = Action::Unknown("Unknown command");
-
+fn parse_cmd(line: &str) -> Result<Action, &'static str> {
     if line.len() < 1 {
-        return error;
+        return Ok(Action::Error("unknown command"))
     }
 
     let command = &line[0..1];
     let param = &line[1..].trim();
 
-    match command {
+    let action = match command {
         "Q" => Action::Quit,
         "C" => Action::Count,
-        "P" => Action::Print(param.parse::<i32>().unwrap()),
+        "P" => Action::Print(param.parse::<i32>().map_err(|_e| "illegal command format")?),
         "R" => Action::Read(param),
         "W" => Action::Write(param),
         "F" => Action::Find(param),
-        "S" => Action::Sort(param.parse::<u8>().unwrap()),
-        _ => error,
-    }
+        "S" => Action::Sort(param.parse::<u8>().map_err(|_e| "illegal command format")?),
+        _ => Action::Error(command),
+    };
+    Ok(action)
 }
 
 fn parse_csv(line: &str) -> Result<Profile, &'static str> {
@@ -72,7 +84,7 @@ fn parse_csv(line: &str) -> Result<Profile, &'static str> {
 
     // id, name, birthday, address, description
     if columns.len() == 5 {
-        Ok(Profile::new(columns))
+        Ok(Profile::from_vector(columns))
     } else {
         Err("CSV format error: length != 5")
     }

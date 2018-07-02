@@ -1,10 +1,13 @@
+use std::cmp::Ordering;
 use std::fmt::{self, Display};
+use std::fs;
+use std::io::Write;
 use std::num::ParseIntError;
 use std::str::FromStr;
 
-//////////////////
+////////////////////////////////////////////////////////////////
 // Action
-//////////////////
+///
 #[derive(Debug)]
 pub enum Action<'a> {
     Append(Profile),
@@ -15,13 +18,49 @@ pub enum Action<'a> {
     Write(&'a str),
     Find(&'a str),
     Sort(u8),
-    Unknown(&'a str),
+    Error(&'a str),
 }
 
-//////////////////
-// Date
-//////////////////
+impl<'a> Action<'a> {
+    pub fn append(profile_db: &mut ProfileDB, profile: Profile) {
+        eprintln!("Command Append: {:?}", profile);
+        profile_db.push(profile)
+    }
 
+    pub fn quit() {
+        eprintln!("Command: Quit");
+        std::process::exit(0)
+    }
+
+    pub fn count(profile_db: &ProfileDB) {
+        eprintln!("Command: Count");
+        println!("{} profile(s)", profile_db.len());
+    }
+
+    pub fn print(profile_db: &ProfileDB, start: i32) {
+        eprintln!("Command: Print {}", start);
+        profile_db.print()
+    }
+
+    pub fn write(profile_db: &mut ProfileDB, filename: &str) -> Result<(), String> {
+        eprintln!("Command: Write {}", filename);
+        profile_db.save(filename)
+    }
+
+    pub fn find(profile_db: &ProfileDB, word: &str) {
+        eprintln!("Command: Find {}", word);
+        profile_db.find(word)
+    }
+
+    pub fn sort(profile_db: &mut ProfileDB, key: u8) {
+        eprintln!("Command: Sort key:{}", key);
+        profile_db.sort(key)
+    }
+}
+
+////////////////////////////////////////////////////////////////
+/// Date - my date
+///
 #[derive(Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub struct Date {
     y: u32,
@@ -35,14 +74,14 @@ impl Date {
     }
 }
 
-// Display trait implements to_string
+/// Display trait implements to_string
 impl Display for Date {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}-{}-{}", self.y, self.m, self.d)
     }
 }
 
-// implement "2018-06-30".parse::<Date>
+/// implement "2018-06-30".parse::<Date>
 impl FromStr for Date {
     type Err = ParseIntError;
 
@@ -53,6 +92,8 @@ impl FromStr for Date {
         let d = ymd[2].parse::<u8>()?;
         Ok(Date { y, m, d })
     }
+
+    // XXX: should be called from `from_str`: fn is_valid_date(y: u32, m: u8, d: u8) {}
 }
 
 #[cfg(test)]
@@ -81,25 +122,9 @@ mod test {
     }
 }
 
-//////////////////
-// Command
-//////////////////
-#[derive(Debug)]
-pub struct Command {
-    name: String,
-}
-
-impl Command {
-    pub fn new(name: &str) -> Command {
-        Command {
-            name: name.to_string(),
-        }
-    }
-}
-
-//////////////////
-// Profile
-//////////////////
+////////////////////////////////////////////////////////////////
+/// Profile
+///
 #[derive(Debug)]
 pub struct Profile {
     pub id: u32,
@@ -109,8 +134,23 @@ pub struct Profile {
     pub comment: String,
 }
 
+/// Display trait implements to_string
+impl Display for Profile {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "id: {}\nname: {}\nbirthday: {}\nhome: {}\ncomment: {}",
+            self.id, self.name, self.birthday, self.home, self.comment
+        )
+    }
+}
+
 impl Profile {
-    pub fn new(columns: Vec<&str>) -> Profile {
+    pub fn new(id: u32, name: String, birthday: Date, home: String, comment: String,) -> Self {
+        Profile {id, name, birthday, home, comment}
+    }
+
+    pub fn from_vector(columns: Vec<&str>) -> Profile {
         Profile {
             id: columns[0].parse::<u32>().unwrap(),
             name: columns[1].to_string(),
@@ -119,29 +159,83 @@ impl Profile {
             comment: columns[4].to_string(),
         }
     }
+
+    pub fn to_csv(&self) -> String {
+        format!("{},{},{},{},{}\n", self.id, self.name, self.birthday, self.home, self.comment)
+    }
+
+    pub fn find(&self, word: &str) -> bool {
+        if self.id.to_string() == word
+            || self.name == word
+            || self.birthday.to_string() == word
+            || self.home == word
+            || self.comment == word
+        {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn compare_by(&self, other: &Profile, key: u8) -> Ordering {
+        match key {
+            1 => self.id.cmp(&other.id),
+            2 => self.name.cmp(&other.name),
+            3 => self.birthday.cmp(&other.birthday),
+            4 => self.home.cmp(&other.home),
+            5 => self.comment.cmp(&other.comment),
+            _ => panic!("Unknown sort key {}", key),
+        }
+    }
 }
 
-//////////////////
-// ProfileDB
-//////////////////
+////////////////////////////////////////////////////////////////
+/// Collection of Profile
+///
 #[derive(Debug)]
 pub struct ProfileDB {
     profiles: Vec<Profile>,
 }
 
 impl ProfileDB {
-    pub fn new() -> ProfileDB {
+    pub fn new() -> Self {
         ProfileDB {
             profiles: Vec::new(),
         }
     }
 
-    pub fn exec(&self, command: Command) -> () {
-        println!("exec command {}", command.name);
+    pub fn find(&self, word: &str) {
+        for p in &self.profiles {
+            if p.find(word) {
+                println!("{}", p)
+            }
+        }
     }
 
-    pub fn push(&mut self, profile: Profile) -> () {
-        println!("pushed: {:?}", profile);
+    pub fn len(&self) -> usize {
+        self.profiles.len()
+    }
+
+    pub fn print(&self) {
+        for p in &self.profiles {
+            println!("{}", p)
+        }
+    }
+
+    pub fn push(&mut self, profile: Profile) {
         self.profiles.push(profile);
+    }
+
+    pub fn save(&self, filename: &str) -> Result<(), String> {
+        let mut f = fs::File::create(filename).map_err(|e| e.to_string())?;
+        for p in &self.profiles {
+            f.write(&*p.to_csv().as_bytes())
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    pub fn sort(&mut self, key: u8) {
+        self.profiles.sort_by(|a, b| a.compare_by(b, key));
     }
 }
