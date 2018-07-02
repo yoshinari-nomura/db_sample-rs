@@ -1,7 +1,7 @@
 extern crate db_sample;
 use db_sample::*;
-use std::io::{self, BufRead, BufReader};
 use std::fs;
+use std::io::{self, BufRead, BufReader};
 
 fn main() {
     let file = io::stdin();
@@ -48,7 +48,6 @@ fn parse_line(line: &str) -> Action {
         } else {
             Action::Error("illegal command format")
         }
-
     } else {
         if let Ok(profile) = parse_csv(line) {
             Action::Append(profile)
@@ -60,7 +59,7 @@ fn parse_line(line: &str) -> Action {
 
 fn parse_cmd(line: &str) -> Result<Action, &'static str> {
     if line.len() < 1 {
-        return Ok(Action::Error("unknown command"))
+        return Ok(Action::Error("unknown command"));
     }
 
     let command = &line[0..1];

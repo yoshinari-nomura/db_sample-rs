@@ -146,8 +146,14 @@ impl Display for Profile {
 }
 
 impl Profile {
-    pub fn new(id: u32, name: String, birthday: Date, home: String, comment: String,) -> Self {
-        Profile {id, name, birthday, home, comment}
+    pub fn new(id: u32, name: String, birthday: Date, home: String, comment: String) -> Self {
+        Profile {
+            id,
+            name,
+            birthday,
+            home,
+            comment,
+        }
     }
 
     pub fn from_vector(columns: Vec<&str>) -> Profile {
@@ -161,7 +167,10 @@ impl Profile {
     }
 
     pub fn to_csv(&self) -> String {
-        format!("{},{},{},{},{}\n", self.id, self.name, self.birthday, self.home, self.comment)
+        format!(
+            "{},{},{},{},{}\n",
+            self.id, self.name, self.birthday, self.home, self.comment
+        )
     }
 
     pub fn find(&self, word: &str) -> bool {
@@ -229,8 +238,7 @@ impl ProfileDB {
     pub fn save(&self, filename: &str) -> Result<(), String> {
         let mut f = fs::File::create(filename).map_err(|e| e.to_string())?;
         for p in &self.profiles {
-            f.write(&*p.to_csv().as_bytes())
-                .map_err(|e| e.to_string())?;
+            f.write(&*p.to_csv().as_bytes()).map_err(|e| e.to_string())?;
         }
         Ok(())
     }
