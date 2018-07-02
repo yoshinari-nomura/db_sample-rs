@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::cmp::{max, min, Ordering};
 use std::fmt::{self, Display};
 use std::fs;
 use std::io::Write;
@@ -37,9 +37,22 @@ impl<'a> Action<'a> {
         println!("{} profile(s)", profile_db.len());
     }
 
-    pub fn print(profile_db: &ProfileDB, start: i32) {
-        eprintln!("Command: Print {}", start);
-        profile_db.print()
+    pub fn print(profile_db: &ProfileDB, nitems: i32) {
+        let mut s = 0;
+        let mut e = profile_db.len();
+
+        // head |nitems| if nitems > 0
+        if nitems > 0 {
+            e = min(nitems as usize, e);
+        };
+
+        // tail |nitems| if nitems < 0
+        if nitems < 0 {
+            let n = -nitems as usize;
+            s = max(e, n) - n
+        };
+        eprintln!("Command: Print {} ({}..{})", nitems, s, e);
+        profile_db.print(s..e);
     }
 
     pub fn write(profile_db: &mut ProfileDB, filename: &str) -> Result<(), String> {
@@ -225,8 +238,8 @@ impl ProfileDB {
         self.profiles.len()
     }
 
-    pub fn print(&self) {
-        for p in &self.profiles {
+    pub fn print(&self, range: std::ops::Range<usize>) {
+        for p in &self.profiles[range] {
             println!("{}", p)
         }
     }

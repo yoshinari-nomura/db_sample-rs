@@ -32,7 +32,7 @@ fn do_action(action: Action, profile_db: &mut ProfileDB) {
         Action::Append(profile) => Action::append(profile_db, profile),
         Action::Quit => Action::quit(),
         Action::Count => Action::count(profile_db),
-        Action::Print(start) => Action::print(profile_db, start),
+        Action::Print(nitems) => Action::print(profile_db, nitems),
         Action::Read(file) => parse_lines(Box::new(fs::File::open(file).unwrap()), profile_db),
         Action::Write(file) => Action::write(profile_db, file).unwrap(),
         Action::Find(word) => Action::find(profile_db, word),
