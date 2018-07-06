@@ -14,7 +14,7 @@ fn main() {
 ///
 /// FILE would be Stdin or File.
 ///
-/// # Exaample
+/// # Examples
 /// ```
 /// file = Box::new(fs::File::open("filename.csv").unwrap());
 /// file = Box::new(io::stdin());
