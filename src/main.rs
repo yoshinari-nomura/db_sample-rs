@@ -100,7 +100,7 @@ mod test {
         let p = parse_csv(TEST_CSV_STRING).unwrap();
         assert_eq!(p.id, 1);
         assert_eq!(p.name, "nom");
-        assert_eq!(p.birthday, Date::new(2018, 6, 28));
+        assert_eq!(p.birthday, Date::new(2018, 6, 28).unwrap());
         assert_eq!(p.home, "okayama");
         assert_eq!(p.comment, "hello!");
     }

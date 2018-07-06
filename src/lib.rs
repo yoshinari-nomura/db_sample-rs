@@ -82,8 +82,30 @@ pub struct Date {
 }
 
 impl Date {
-    pub fn new(y: u32, m: u8, d: u8) -> Date {
-        Date { y, m, d }
+    pub fn new(y: u32, m: u8, d: u8) -> Result<Date, &'static str> {
+        if Date::is_valid_date(y, m, d) {
+            Ok(Date { y, m, d })
+        } else {
+            Err("out of range error")
+        }
+    }
+
+    fn is_leap_year(y: u32) -> bool {
+        ((y % 4 == 0) && (y % 100 != 0)) || (y % 400 == 0)
+    }
+
+    fn days_of_month(y: u32, m: u8) -> u8 {
+        let dom = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+        if m == 2 {
+            dom[2] + if Date::is_leap_year(y) { 1 } else { 0 }
+        } else {
+            dom[m as usize]
+        }
+    }
+
+    fn is_valid_date(y: u32, m: u8, d: u8) -> bool {
+        0 < y && 0 < m && m < 13 && 0 < d && d <= Date::days_of_month(y, m)
     }
 }
 
@@ -105,8 +127,6 @@ impl FromStr for Date {
         let d = ymd[2].parse::<u8>()?;
         Ok(Date { y, m, d })
     }
-
-    // XXX: should be called from `from_str`: fn is_valid_date(y: u32, m: u8, d: u8) {}
 }
 
 #[cfg(test)]
