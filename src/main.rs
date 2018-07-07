@@ -41,6 +41,17 @@ fn do_action(action: Action, profile_db: &mut ProfileDB) {
     }
 }
 
+/// Parse line and return Action.
+///
+/// Parse `line` and return `Action`.
+///
+/// # Examples
+///
+/// ```rust
+/// assert_eq!(parse_line("%Q"), Action::Quit);
+/// assert_eq!(parse_line("%P 0"), Action::Print(0));
+/// ```
+///
 fn parse_line(line: &str) -> Action {
     if line.starts_with("%") {
         if let Ok(cmd) = parse_cmd(&line[1..]) {
