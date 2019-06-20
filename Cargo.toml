@@ -2,5 +2,6 @@
 name = "db_sample"
 version = "0.1.0"
 authors = ["Yoshinari Nomura"]
+edition = "2018"
 
 [dependencies]
