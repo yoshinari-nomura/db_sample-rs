@@ -1,0 +1,235 @@
+* io から文字列を read するイテレータでの UTF-8 エラーハンドリングをどうするか
+
+  UTF-8 なファイルを行単位で読んでいるときに，
+  たまに UTF-8 として invalid なシーケンスを含む行がある．
+  その行がまるまる失われてしまうと困るので，文字を読み飛ばしたい．
+
+** *案1* read_until で Vec<u8> で受けて，String::from_utf8_lossy に渡す
+
+   String::from_utf8_lossy は，invalid なシーケンスを
+   「U+FFFD REPLACEMENT CHARACTER」に置き換えてくれる．
+   valid なシーケンスだと，そのまま．Cow を使っている．
+
+   Lines イテレータの亜種 (中で String::from_utf8_lossy を使う) を作るのがいい?
+
+   *問題点* invalid なシーケンスを purge したかどうかを知る術がないのが問題では?
+   例えば，間違って，SJIS とか食わせるとボロボロになるので，その時は，何か対処したい．
+   1行のX%以上がinvalidなシーケンス → 何かおかしい，知る術が欲しい．
+
+** *案2* =String::from_utf8_unchecked(buf)= を使う．
+
+   https://doc.rust-lang.org/std/str/fn.from_utf8_unchecked.html
+   unchecked の場合，println! に食わせると落たりするのかと思ったが，そうじゃないっぽい．
+   ??? のような表示になるだけなので，実は，あまり問題ない?
+
+   *残る問題点* invalid なシーケンスが含まれているか知る術がない．
+
+   表示する必要が生まれた際に lazy に validate するような仕組みがあればいい?
+   こんなイメージ
+   #+BEGIN_SRC rust
+     String::from_utf8(unchecked_string.into_bytes())
+     String::from_utf8_lossy(unchecked_string.into_bytes()) -> Cow<String,_>
+   #+END_SRC
+
+* Lines 回りの実装
+  コード:
+  + [[https://doc.rust-lang.org/std/string/struct.String.html#method.from_utf8][std::string::String - Rust]]
+  + [[https://doc.rust-lang.org/std/str/fn.from_utf8.html][std::str::from_utf8 - Rust]]
+  + [[https://doc.rust-lang.org/std/string/struct.String.html#method.from_utf8_lossy][from_utf8_lossy]]
+
+  通常，こんな感じで書くよね．buf.lines() が Lines という Iterator を返す．
+  #+BEGIN_SRC rust
+    fn parse_file(file: Box<io::Read>) {
+        let buf = BufReader::new(file);
+
+        for line in buf.lines() {
+            println!("{:?}", line);
+        }
+    }
+  #+END_SRC
+
+  lines() の実装:
+  https://github.com/rust-lang/rust/blob/cca43a7f977963ee497ca091fbdf3cea95abdf47/src/libstd/io/mod.rs#L1637
+  #+BEGIN_SRC rust
+    fn lines(self) -> Lines<Self> where Self: Sized {
+        Lines { buf: self }
+    }
+  #+END_SRC
+
+  lines() が返す Lines Iterator の中身:
+  https://github.com/rust-lang/rust/blob/cca43a7f977963ee497ca091fbdf3cea95abdf47/src/libstd/io/mod.rs#L2152
+  #+BEGIN_SRC rust
+    pub struct Lines<B> {
+        buf: B,
+    }
+
+    impl<B: BufRead> Iterator for Lines<B> {
+        type Item = Result<String>;
+
+        fn next(&mut self) -> Option<Result<String>> {
+            let mut buf = String::new();
+            match self.buf.read_line(&mut buf) { // ここで1行読んでいる
+                Ok(0) => None,
+                Ok(_n) => {
+                    if buf.ends_with("\n") {
+                        buf.pop();
+                        if buf.ends_with("\r") {
+                            buf.pop();
+                        }
+                    }
+                    Some(Ok(buf))
+                }
+                Err(e) => Some(Err(e))
+            }
+        }
+    }
+  #+END_SRC
+
+  上記の BufRead#buf.read_line(&mut buf) の中で起こっていること:
+  https://github.com/rust-lang/rust/blob/cca43a7f977963ee497ca091fbdf3cea95abdf47/src/libstd/io/mod.rs#L1557
+  #+BEGIN_SRC rust
+    fn read_line(&mut self, buf: &mut String) -> Result<usize> {
+        // Note that we are not calling the `.read_until` method here, but
+        // rather our hardcoded implementation. For more details as to why, see
+        // the comments in `read_to_end`.
+        append_to_string(buf, |b| read_until(self, b'\n', b))
+    }
+  #+END_SRC
+
+  read_until の実装: ここまでは， Vec<u8> なので，UTF-8 エンコードに依らない
+  https://github.com/rust-lang/rust/blob/cca43a7f977963ee497ca091fbdf3cea95abdf47/src/libstd/io/mod.rs#L1295
+  #+BEGIN_SRC rust
+    fn read_until<R: BufRead + ?Sized>(r: &mut R, delim: u8, buf: &mut Vec<u8>)
+                                       -> Result<usize> {
+        let mut read = 0;
+        loop {
+            let (done, used) = {
+                let available = match r.fill_buf() {
+                    Ok(n) => n,
+                    Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
+                    Err(e) => return Err(e)
+                };
+                match memchr::memchr(delim, available) {
+                    Some(i) => {
+                        buf.extend_from_slice(&available[..i + 1]);
+                        (true, i + 1)
+                    }
+                    None => {
+                        buf.extend_from_slice(available);
+                        (false, available.len())
+                    }
+                }
+            };
+            r.consume(used);
+            read += used;
+            if done || used == 0 {
+                return Ok(read);
+            }
+        }
+    }
+  #+END_SRC
+
+  append_to_stringの実装 ここで， Vec<u8> → String にしているところで，UTF-8 validate してる
+  : str::from_utf8(&g.buf[g.len..] しているところで，エラーが起こる．
+  https://github.com/rust-lang/rust/blob/cca43a7f977963ee497ca091fbdf3cea95abdf47/src/libstd/io/mod.rs#L338
+  #+BEGIN_SRC rust
+    fn append_to_string<F>(buf: &mut String, f: F) -> Result<usize>
+        where F: FnOnce(&mut Vec<u8>) -> Result<usize>
+    {
+        unsafe {
+            let mut g = Guard { len: buf.len(), buf: buf.as_mut_vec() };
+            let ret = f(g.buf);
+            if str::from_utf8(&g.buf[g.len..]).is_err() {
+                ret.and_then(|_| {
+                    Err(Error::new(ErrorKind::InvalidData,
+                                   "stream did not contain valid UTF-8"))
+                })
+            } else {
+                g.len = g.buf.len();
+                ret
+            }
+        }
+    }
+  #+END_SRC
+
+* Rust の環境設定
+  + emacs
+    + Racer ::  https://github.com/racer-rust/emacs-racer
+      + 入力補完
+      + 定義にジャンプ
+      + ライブラリのドキュメント表示
+    + rust-mode
+    + flycheck-rust
+    + company-racer
+  + racer
+  rustfmt は標準で (rustup update) 入るので入れなくてもいいみたい
+
+* 参考資料
+  + [[http://rust-lang-ja.github.io/the-rust-programming-language-ja/1.6/book/error-handling.html][エラーハンドリング]] (古いが，参考になる．ただし， =try!= ではなく， =?= を使うといい)
+  + [[https://doc.rust-lang.org/std/index.html][std - Rust Standard Library]]
+  + [[https://github.com/rust-lang/rfcs/blob/master/text/1574-more-api-documentation-conventions.md#unresolved-questions][ドキュメントコメントの書き方に関する RFC1574]]
+
+* FAQ
+** 動的割付の固定長配列
+   [[https://qiita.com/tenomoto/items/2891d45e1b3bf2954956][Rustの「配列」たち]]
+   #+BEGIN_SRC rust
+     fn myalloc(n: usize) -> Box<[f64]> {
+         vec![0.0; n].into_boxed_slice()
+     }
+   #+END_SRC
+
+** Cargo.lock は，リポジトリに入れるべき?
+   + [[https://github.com/rust-lang/cargo/issues/315][Should Cargo.lock be committed, or added to .gitignore?]]
+     → Gemfile.lock と同じ方針でいいみたい．
+     : it should be ignored for libraries, tracked for binaries.
+
+** 標準入力から行を読むには?
+   + [[https://stackoverflow.com/questions/30186037/how-can-i-read-a-single-line-from-stdin][rust - How can I read a single line from stdin? - Stack Overflow]]
+     #+BEGIN_SRC rust
+       use std::io::{self, BufRead};
+
+       fn main() {
+           let stdin = io::stdin();
+           for line in stdin.lock().lines() {
+               println!("{}", line.unwrap());
+           }
+       }
+     #+END_SRC
+
+   + 通常は，[[https://doc.rust-lang.org/std/io/struct.BufReader.html][std::io::BufReader]] を使うものらしい
+     #+BEGIN_SRC rust
+       use std::fs::File;
+       use std::io::prelude::*;
+       use std::io::BufReader;
+
+       fn main() {
+           let f = File::open("README.org").unwrap();
+           let reader = BufReader::new(f);
+
+           for line in reader.lines() {
+               println!("{}", line.unwrap());
+           }
+       }
+     #+END_SRC
+
+** 標準入力とファイルを透過的に扱う
+   + [[https://www.reddit.com/r/rust/comments/32rjdd/reading_from_a_file_or_stdin_based_on_command/][Reading from a file or STDIN based on command line arguments. : rust]]
+     File も stdin も io::Read を実装しているので，Box して trait オブジェクトにすればいい．
+     #+BEGIN_SRC rust
+       use std::env;
+       use std::fs;
+       use std::io;
+
+       fn main() {
+           let input = env::args().nth(1).unwrap();
+           let mut rdr: Box<io::Read> = if input == "-" {
+               Box::new(io::stdin())
+           } else {
+               Box::new(fs::File::open(input).unwrap())
+           };
+           io::copy(&mut rdr, &mut io::stdout()).unwrap();
+       }
+     #+END_SRC
+
+** 自身の mod の中のプライベートな関数を呼び出すには?
+** ref と & ってどう違うの?
